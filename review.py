@@ -138,7 +138,7 @@ DIFF:
             f"PR #{pr_number} 审阅 JSON 解析失败（{_REVIEW_RETRIES}次重试）"
         ) from last_error
 
-    async with GitHubClient(_write_token_for_repo(config, repo)) as client:
+    async with GitHubClient(_write_token_for_repo(config, repo_full_name)) as client:
         body_lines = [f"**自动代码审阅**\n\n{review_result.get('summary', '')}\n"]
 
         issues = review_result.get("issues", [])
