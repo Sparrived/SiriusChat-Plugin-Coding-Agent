@@ -120,7 +120,7 @@ async def _process_new_issue(
     engine_proxy: Any,
     data_store: Any,
 ) -> None:
-    """处理新发现的 Issue：标签 → 回复 → 通知 → 待审批。"""
+    """处理新发现的 Issue：标签 → 回复 → 直接进入信息收集（跳过管理员审批）。"""
     issue_number = issue_data["number"]
     labels: list[str] = []
 
@@ -139,21 +139,23 @@ async def _process_new_issue(
         except Exception as exc:
             logger.error("Issue #%d 智能回复失败: %s", issue_number, exc, exc_info=True)
 
-    # 生成 TaskID 并通知管理员
+    # 直接创建 tracker 任务状态，开始信息收集（跳过管理员审批步骤）
     import uuid
+    from .tracker import IssueTracker, IssueState, _PREFIX
 
     task_id = uuid.uuid4().hex[:12]
-    task_data = {
-        "task_id": task_id,
-        "repo": repo_name,
-        "issue_number": issue_number,
-        "issue_title": issue_data.get("title", ""),
-        "issue_body": issue_data.get("body", ""),
-        "labels": labels,
-        "status": "PENDING_APPROVAL",
-        "created_at": time.time(),
-    }
-    data_store.set(f"task_{task_id}", task_data)
+    state = IssueState(
+        issue_number=issue_number,
+        repo=repo_name,
+        title=issue_data.get("title", ""),
+        body=issue_data.get("body", ""),
+        labels=labels,
+        status="GATHERING_INFO",
+        task_id=task_id,
+    )
+    data_store.set(f"{_PREFIX}{task_id}", state)
+
+    logger.info("Issue #%d 已创建 tracker 任务 %s，跳过审批直接进入信息收集", issue_number, task_id)
 
     admin_id = _resolve_admin_id(adapter)
     if admin_id:
@@ -163,7 +165,7 @@ async def _process_new_issue(
             f"📥 新 Issue #{issue_number}: {issue_data.get('title', '')}\n"
             f"🏷 标签: {label_str}\n"
             f"📋 仓库: {repo_name}\n"
-            f"💬 回复 /gh {task_id} auto 启动自动修复",
+            f"🔄 已跳过审批，直接进入信息收集阶段喵~",
         )
 
 
