@@ -80,11 +80,24 @@ async def try_close_garbage_pr(
         logger.info("PR #%d 已被外部关闭，跳过垃圾检测", pr_number)
         return True
 
+    # 获取 PR 完整信息（webhook payload 的 body 可能为空）
+    from .api import get_pr, get_pr_diff
+    full_pr = await get_pr(repo_name, pr_number, config)
+    if full_pr:
+        pr_data = full_pr
+
+    # 获取 diff 用于内容判断
+    diff_text = ""
+    try:
+        diff_text = await get_pr_diff(repo_name, pr_number, config)
+    except Exception:
+        pass
+
     result_text = ""
     for attempt in range(1, _MAX_RETRIES + 1):
         try:
             result_text = await engine_proxy.generate_raw(
-                _build_pr_garbage_prompt(pr_data), inject_persona=False, model=config.get("model", ""), json_mode=True,
+                _build_pr_garbage_prompt(pr_data, diff_text), inject_persona=False, model=config.get("model", ""), json_mode=True,
             )
             result_text = result_text.strip()
             break
@@ -187,7 +200,10 @@ Issue 内容:
 {{"is_garbage": true或false, "reason": "若判定为垃圾，给出简短中文关闭理由（不超过80字）；否则留空"}}"""
 
 
-def _build_pr_garbage_prompt(pr_data: dict[str, Any]) -> str:
+def _build_pr_garbage_prompt(pr_data: dict[str, Any], diff: str = "") -> str:
+    diff_section = ""
+    if diff.strip():
+        diff_section = f"\n\n代码变更 (diff，前6000字):\n{diff[:6000]}"
     return f"""你正在审核一个 GitHub Pull Request，判断它是否属于垃圾/无意义提交。
 
 判定为垃圾的标准（满足任意一条即可）：
@@ -197,12 +213,12 @@ def _build_pr_garbage_prompt(pr_data: dict[str, Any]) -> str:
 4. 没有任何实质代码变更或仅包含故意破坏性修改
 5. 明确是恶意或滥用性质的提交
 
-注意：如果 PR 包含合理的代码改动哪怕很小，则判定为正常提交。
+注意：如果 PR 包含合理的代码改动哪怕很小，则判定为正常提交。以下情况不是垃圾：自动修复 PR、测试通过后的代码合并、包含实质性 diff 的提交。
 
 PR #{pr_data.get('number', '?')}: {pr_data.get('title', '')}
 
 PR 内容:
-{pr_data.get('body', '')[:3000] or '（无内容）'}
+{pr_data.get('body', '')[:3000] or '（无描述）'}{diff_section}
 
 请以严格的 JSON 格式输出，不要包含其他内容：
 {{"is_garbage": true或false, "reason": "若判定为垃圾，给出简短中文关闭理由（不超过80字）；否则留空"}}"""
