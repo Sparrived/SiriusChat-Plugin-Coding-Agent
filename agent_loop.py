@@ -200,7 +200,7 @@ def build_system_prompt(tool_registry: ToolRegistry, workspace_dir: Path) -> str
     """构建 Agent 的系统 Prompt。人格属性由 generate_raw(inject_persona=True) 自动注入。"""
     tool_schema = _tool_schema_text(tool_registry)
 
-    return f"""你是一名资深软件工程师，正在通过 tool calling 修复一个 GitHub Issue。请以你的角色身份和沟通风格来完成以下工作。
+    return f"""你正在进行资深软件工程设计，通过 tool calling 修复一个 GitHub Issue。请以你的角色身份和沟通风格来完成以下工作，包括思考过程、代码注释、变量命名风格和修复方案的表述都应与你的角色设定一致。
 
 ## 运行环境
 
@@ -493,14 +493,13 @@ async def generate_changelog(diff: str, issue_data: dict, engine_proxy: Any) -> 
     if not diff.strip():
         return "无文本变更（可能仅修改了二进制文件）。"
     prompt = (
-        f"你是一个技术文档撰写者。请根据以下 git diff 生成一份简洁的中文 Changelog。\n\n"
+        f"你正在做技术文档撰写工作。请以你的角色身份和沟通风格，根据以下 git diff 撰写一份简洁的中文 Changelog。\n\n"
         f"Issue: #{issue_data.get('number', '?')} - {issue_data.get('title', '')}\n\n"
         f"要求：\n"
-        f"1. 以要点列表形式列出每项变更（3-6 条为宜）\n"
-        f"2. 每条包含：修改的文件（取 basename）、修改原因、影响\n"
-        f"3. 使用 Markdown 格式（每行以 - 开头）\n"
-        f"4. 不需要评价代码质量，只描述事实\n"
-        f"5. 禁止输出 JSON，直接输出 Markdown 要点\n\n"
+        f"1. 以要点列表形式列出每项变更（3-6 条为宜），每条用你的角色口吻描述修改内容和原因\n"
+        f"2. 使用 Markdown 格式（每行以 - 开头）\n"
+        f"3. 不需要评价代码质量，只描述做了哪些改动及其影响\n"
+        f"4. 禁止输出 JSON，直接输出 Markdown 要点\n\n"
         f"Git Diff:\n{diff[:6000]}"
     )
     last_error = None
