@@ -12,6 +12,66 @@ logger = logging.getLogger(__name__)
 _REVIEW_RETRIES = 3
 
 
+def _build_review_prompt(
+    pr_title: str,
+    pr_body: str,
+    files_summary: str,
+    diff_truncated: str,
+    review_mode: str,
+) -> str:
+    mode_instructions = {
+        "quick": (
+            "聚焦重大问题（安全漏洞、逻辑错误、崩溃风险），"
+            "跳过风格和命名等次要问题。最多输出 5 条问题。"
+        ),
+        "deep": (
+            "进行全面深度审阅，涵盖正确性、安全性、风格、测试、性能五个维度。"
+            "可以指出编码规范问题，上限 15 条。"
+        ),
+        "incremental": (
+            "仅审阅相对于上一次审阅的增量变更，关注新引入的问题。"
+            "如果已有审阅历史，只评价新增代码行。上限 8 条。"
+        ),
+    }
+    instruction = mode_instructions.get(review_mode, mode_instructions["quick"])
+
+    return f"""请对以下 Pull Request 进行代码审阅。以你的角色身份和专业视角完成审阅，评价标准和措辞应符合你的角色设定。
+
+审阅模式: {review_mode}
+
+审阅规则：
+1. {instruction}
+2. 按维度分类问题：正确性 (correctness)、安全性 (security)、风格 (style)、测试 (testing)、性能 (performance)
+3. 每条问题给出：严重程度 (critical/warning/suggestion)、涉及文件、行号、问题描述、修改建议
+4. 如果 diff 中没有明显问题，输出 "未发现明显问题"
+5. 输出严格的 JSON 格式
+
+PR 信息：
+- 标题: {pr_title}
+- 描述: {pr_body[:2000]}
+
+变更文件列表:
+{files_summary}
+
+DIFF:
+{diff_truncated}
+
+请输出 JSON（不要 Markdown 代码块包裹）:
+{{"verdict": "approve|comment|request_changes",
+    "summary": "审阅摘要（1-3句中文）",
+    "issues": [
+        {{"severity": "critical|warning|suggestion",
+            "category": "correctness|security|style|testing|performance|dependency",
+            "file": "文件路径",
+            "line": 行号或null,
+            "title": "问题简述",
+            "description": "详细描述",
+            "suggestion": "修改建议"
+        }}
+    ]
+}}"""
+
+
 def _token(config: dict, repo: str = "") -> str:
     """获取 API token。优先 per-repo token，否则全局 github_pat。"""
     monitor = config.get("_monitor")
@@ -68,41 +128,7 @@ async def auto_review_pr(
     if len(diff_content) > 8000:
         diff_truncated += f"\n... (diff 被截断，原始大小 {len(diff_content)} 字符)"
 
-    system_prompt = f"""请对以下 Pull Request 进行代码审阅。以你的角色身份和专业视角完成审阅，评价标准和措辞应符合你的角色设定。
-
-审阅规则：
-1. 按维度分类问题：正确性 (correctness)、安全性 (security)、风格 (style)、测试 (testing)、性能 (performance)
-2. 每条问题给出：严重程度 (critical/warning/suggestion)、涉及文件、行号、问题描述、修改建议
-3. 不要对无关紧要的风格差异吹毛求疵
-4. 如果 diff 中没有明显问题，输出 "未发现明显问题"
-5. 输出严格的 JSON 格式
-
-PR 信息：
-- 标题: {pr_title}
-- 描述: {pr_body[:2000]}
-
-变更文件列表:
-{files_summary}
-
-DIFF:
-{diff_truncated}
-
-请输出 JSON（不要 Markdown 代码块包裹）:
-{{
-    "verdict": "approve|comment|request_changes",
-    "summary": "审阅摘要（1-3句中文）",
-    "issues": [
-        {{
-            "severity": "critical|warning|suggestion",
-            "category": "correctness|security|style|testing|performance|dependency",
-            "file": "文件路径",
-            "line": 行号或null,
-            "title": "问题简述",
-            "description": "详细描述",
-            "suggestion": "修改建议"
-        }}
-    ]
-}}"""
+    system_prompt = _build_review_prompt(pr_title, pr_body, files_summary, diff_truncated, review_mode)
 
     last_error = None
     review_result = None
