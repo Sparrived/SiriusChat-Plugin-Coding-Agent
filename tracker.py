@@ -458,7 +458,7 @@ Issue #{state.issue_number}: {state.title}
             return base_question
 
     async def _post_summary_and_notify(self, state: IssueState, result: dict[str, Any]) -> None:
-        """信息就绪后：在 Issue 下发一条总结评论，然后通知管理员确认修复。"""
+        """信息就绪后：在 Issue 下发一条总结评论，然后直接启动自动修复（跳过管理员审批）。"""
         from .api import is_issue_closed, post_issue_comment
 
         # 检查 Issue 是否已被外部关闭
@@ -483,31 +483,52 @@ Issue #{state.issue_number}: {state.title}
 请用你的角色口吻写一条信息收集完成的总结，包含：
 1. 对问题核心的简要重述
 2. 对提供信息者的感谢
-3. 告知等待管理员审核后将启动修复
+3. 告知将直接启动自动修复（无需等待审批）
 控制在 80-120 字。只输出正文。"""
             summary_text = await self._engine_proxy.generate_raw(
                 summary_prompt, inject_persona=True,
                 model=self._config.get("model", ""),
             )
         except Exception:
-            summary_text = f"信息收集已完成。等待管理员审核后启动修复。"
+            summary_text = f"信息收集已完成，直接启动自动修复喵~"
 
         await post_issue_comment(state.repo, state.issue_number, summary_text.strip(), self._config)
         state.add_conversation("assistant", summary_text.strip())
         self._save(state)
         logger.info("Tracker: Issue #%d 总结已发布到 Issue", state.issue_number)
 
-        # 2. 通知管理员确认
+        # 2. 直接启动自动修复（跳过管理员审批）
+        state.status = "FIXING"
+        self._save(state)
+        logger.info("Tracker: Issue #%d 跳过审批，直接启动自动修复", state.issue_number)
+
+        from .agent_loop import run_agent_loop
+        task_data = {
+            "task_id": state.task_id,
+            "repo": state.repo,
+            "issue_number": state.issue_number,
+            "issue_title": state.title,
+            "issue_body": state.body,
+            "labels": state.labels,
+            "status": "APPROVED",
+        }
+        asyncio.create_task(
+            run_agent_loop(
+                task_data=task_data,
+                config=self._config,
+                engine_proxy=self._engine_proxy,
+                adapter=self._adapter,
+            )
+        )
+
+        # 3. 通知管理员已自动启动修复
         admin_id = self._config.get("admin_user_id", "")
         if not admin_id:
             from .webhook import _resolve_admin_id
             admin_id = _resolve_admin_id(self._adapter)
-        if not admin_id or not self._adapter:
-            logger.warning("Tracker: Issue #%d 就绪但无法通知 developer", state.issue_number)
-            return
-
-        try:
-            prompt = f"""以你的角色身份向项目管理员发送通知。
+        if admin_id and self._adapter:
+            try:
+                prompt = f"""以你的角色身份向项目管理员发送通知。
 
 Issue #{state.issue_number}: {state.title}
 仓库: {state.repo}
@@ -519,25 +540,48 @@ Issue #{state.issue_number}: {state.title}
 用你的角色口吻告诉管理员:
 1. 信息收集已完成
 2. 总结已发布在 Issue 下
-3. 回复 /gh {state.task_id} auto 即可启动修复，或 /gh {state.task_id} skip 跳过
+3. 已跳过审批，直接启动了自动修复
 控制在 1-2 句话。"""
-            persona_msg = await self._engine_proxy.generate_raw(
-                prompt, inject_persona=True,
-                model=self._config.get("model", ""),
-            )
-            msg = persona_msg.strip() or f"#{state.issue_number} 信息已就绪，回复 /gh {state.task_id} auto 启动修复"
-        except Exception:
-            msg = f"#{state.issue_number}: {state.title}\n仓库: {state.repo}\n回复 /gh {state.task_id} auto 启动自动修复"
+                persona_msg = await self._engine_proxy.generate_raw(
+                    prompt, inject_persona=True,
+                    model=self._config.get("model", ""),
+                )
+                msg = persona_msg.strip() or f"#{state.issue_number} 信息已就绪，已自动启动修复喵~"
+            except Exception:
+                msg = f"#{state.issue_number}: {state.title}\n仓库: {state.repo}\n已跳过审批，自动启动修复喵~"
 
-        await self._adapter.send_private_message(admin_id, msg)
-        logger.info("Tracker: Issue #%d 已通知 developer 确认修复", state.issue_number)
+            await self._adapter.send_private_message(admin_id, msg)
+            logger.info("Tracker: Issue #%d 已通知管理员自动修复已启动", state.issue_number)
 
     async def _notify_developer(self, state: IssueState, result: dict[str, Any]) -> None:
+        """信息就绪后直接启动自动修复（跳过管理员审批）。"""
+        state.status = "FIXING"
+        self._save(state)
+        logger.info("Tracker: Issue #%d 跳过审批，直接启动自动修复 (from _notify_developer)", state.issue_number)
+
+        from .agent_loop import run_agent_loop
+        task_data = {
+            "task_id": state.task_id,
+            "repo": state.repo,
+            "issue_number": state.issue_number,
+            "issue_title": state.title,
+            "issue_body": state.body,
+            "labels": state.labels,
+            "status": "APPROVED",
+        }
+        asyncio.create_task(
+            run_agent_loop(
+                task_data=task_data,
+                config=self._config,
+                engine_proxy=self._engine_proxy,
+                adapter=self._adapter,
+            )
+        )
+
         from .webhook import _resolve_admin_id
         admin_id = _resolve_admin_id(self._adapter)
         if not admin_id or not self._adapter:
-            logger.warning("Tracker: Issue #%d 就绪但无法通知 developer (admin=%s adapter=%s)",
-                           state.issue_number, bool(admin_id), bool(self._adapter))
+            logger.warning("Tracker: Issue #%d 已自动启动修复，但无法通知管理员", state.issue_number)
             return
         approach = result.get("approach", "待分析")
         try:
@@ -548,10 +592,10 @@ Issue #{state.issue_number}: {state.title}
 修复方案: {approach}
 任务ID: {state.task_id}
 
-用你的角色口吻告诉管理员这个 Issue 已就绪，回复 /gh {state.task_id} auto 即可启动修复。1-2句话。"""
+用你的角色口吻告诉管理员这个 Issue 已就绪，已经自动启动修复了喵~ 1-2句话。"""
             persona_msg = await self._engine_proxy.generate_raw(prompt, inject_persona=True, model=self._config.get("model", ""))
-            msg = persona_msg.strip() or f"[READY] Issue #{state.issue_number} 信息已就绪，回复 /gh {state.task_id} auto 启动修复"
+            msg = persona_msg.strip() or f"[READY] Issue #{state.issue_number} 信息已就绪，已自动启动修复喵~"
         except Exception:
-            msg = f"[READY] Issue #{state.issue_number}: {state.title}\n仓库: {state.repo}\n回复 /gh {state.task_id} auto 启动自动修复"
+            msg = f"[READY] Issue #{state.issue_number}: {state.title}\n仓库: {state.repo}\n已跳过审批，自动启动修复喵~"
         await self._adapter.send_private_message(admin_id, msg)
-        logger.info("Tracker: Issue #%d 已通知 developer (admin=%s)", state.issue_number, admin_id)
+        logger.info("Tracker: Issue #%d 已通知管理员自动修复已启动 (admin=%s)", state.issue_number, admin_id)
