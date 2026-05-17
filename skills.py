@@ -95,8 +95,16 @@ def _validate_path(file_path: str) -> Path:
 
 
 async def search_content(keyword: str, directory: str = ".") -> str:
-    """搜索关键词，返回文件路径与行号。使用 Python 原生实现，无外部依赖。"""
-    base = Path(directory).resolve()
+    """搜索关键词，返回文件路径与行号。使用 Python 原生实现，无外部依赖。
+    搜索范围始终限制在工作区根目录内，外部路径会被截断。"""
+    base = (Path(directory) if directory != "." else Path(".")).resolve()
+    # 限制在工作区内
+    if _workspace_root is not None:
+        try:
+            base = base.relative_to(_workspace_root)
+        except ValueError:
+            base = Path(".")
+        base = (_workspace_root / base).resolve()
     if not base.exists():
         return f"搜索目录不存在: {directory}"
     results: list[str] = []
