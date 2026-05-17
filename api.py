@@ -266,7 +266,10 @@ async def add_labels_to_issue(
             f"/repos/{repo}/issues/{issue_number}/labels",
             json={"labels": labels},
         )
-        return resp.status_code == 200
+        if resp.status_code == 200:
+            return True
+        logger.warning("添加标签失败 Issue #%d: HTTP %d - %s", issue_number, resp.status_code, resp.text[:200])
+        return False
 
 
 async def remove_label_from_issue(

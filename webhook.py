@@ -58,8 +58,11 @@ async def handle_issue_opened(
     if config.get("auto_label", True):
         try:
             labels = await auto_label_issue(issue_data, repo_name, config, engine_proxy)
-            await apply_labels_to_issue(repo_name, issue_number, labels, config)
-            logger.info("Issue #%d 自动标签: %s", issue_number, labels)
+            ok = await apply_labels_to_issue(repo_name, issue_number, labels, config)
+            if ok:
+                logger.info("Issue #%d 自动标签: %s", issue_number, labels)
+            else:
+                logger.warning("Issue #%d 自动标签 API 调用失败（HTTP非200）: %s", issue_number, labels)
         except Exception as exc:
             logger.error("Issue #%d 自动标签失败: %s", issue_number, exc, exc_info=True)
 
