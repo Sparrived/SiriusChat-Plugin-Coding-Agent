@@ -25,7 +25,7 @@ from .webhook import handle_issue_opened, handle_pr_event, set_tracker
 
 logger = logging.getLogger(__name__)
 
-_plugin_dependencies = ["httpx", "GitPython"]
+_plugin_dependencies = ["httpx", "GitPython", "pytest", "pytest-asyncio", "pytest-cov", "pytest-xdist"]
 
 
 class CodingAgentPlugin(PluginBase):
