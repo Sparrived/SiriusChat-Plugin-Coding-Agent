@@ -54,6 +54,14 @@ class CodingAgentPlugin(PluginBase):
         {"name": "log_archive_enabled", "type": "boolean", "description": "启用工作流日志归档", "default": True},
         {"name": "log_archive_max_count", "type": "int", "description": "归档日志最大保留数", "default": 50},
     ]
+    _plugin_permissions = {
+        "developer_only": True,
+        "hidden_from_intent": True,
+    }
+    _plugin_prompt_inject = (
+        "编码助手：我可以在后台管理 GitHub Issue 和 PR，包括代码修复、"
+        "自动化测试、PR 审阅等，也支持直接执行 Python 代码片段"
+    )
 
     def __init__(self) -> None:
         super().__init__()
@@ -235,6 +243,7 @@ class CodingAgentPlugin(PluginBase):
         render_mode="direct",
         description="执行一行 Python 代码并返回结果",
         examples=["/py print('Hello World')", "/py 1+1"],
+        hidden_from_intent=True,
     )
     async def execute_python(self, code: str) -> PluginResponse:
         old_stdout = sys.stdout
@@ -256,6 +265,7 @@ class CodingAgentPlugin(PluginBase):
         render_mode="direct",
         description="GitHub Agent 指令：管理 Issue 修复、PR 审阅",
         examples=["/gh <task_id> auto", "/gh review <repo_index> <pr_number> [quick|deep]"],
+        hidden_from_intent=True,
     )
     async def github_agent(self, command_args: str = "") -> PluginResponse:
         if not self._monitor.repo_names:
