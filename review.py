@@ -4,7 +4,7 @@ import json
 import logging
 from typing import Any
 
-from sirius_chat.github.client import GitHubClient, github_headers
+from sirius_pulse.github.client import GitHubClient, github_headers
 from .api import _write_token_for_repo
 
 logger = logging.getLogger(__name__)

@@ -7,15 +7,15 @@ import sys
 import traceback
 from typing import Any
 
-from sirius_chat.github.event_bridge import (
+from sirius_pulse.github.event_bridge import (
     register_comment_handler,
     register_issue_handler,
     register_pr_handler,
     set_coding_bot_login,
     set_issue_repos,
 )
-from sirius_chat.plugins import PluginBase, PluginResponse
-from sirius_chat.plugins.decorators import command
+from sirius_pulse.core.brain import Brain, ChatRequest, ChatResult
+from sirius_pulse.plugins.api import PluginBase, command, PluginResponse
 
 from .commands import handle_gh_command
 from .config import GithubAgentConfig
@@ -69,6 +69,7 @@ class CodingAgentPlugin(PluginBase):
         self._monitor: MonitorConfig = MonitorConfig()
         self._effective_repos: list[str] = []
         self._tracker: IssueTracker | None = None
+        self._brain_hooks_registered: bool = False
 
     async def on_load(self) -> None:
         self._gh_config = GithubAgentConfig.from_dict(self.ctx.config)
@@ -192,6 +193,8 @@ class CodingAgentPlugin(PluginBase):
 
         register_comment_handler(_on_issue_comment)
 
+        self._register_brain_hooks()
+
         logger.info("coding_agent v2.2 启动完成 (monitor_repos=%d, effective=%d, tracker=on, "
                     "auto_label=%s, auto_review=%s, auto_close=%s, max_q=%d)",
                     len(self._monitor.repo_names), len(self._effective_repos),
@@ -234,6 +237,63 @@ class CodingAgentPlugin(PluginBase):
         if isinstance(plugin_config, dict):
             return str(plugin_config.get("root", "")).strip()
         return ""
+
+    # ── Brain Hooks ─────────────────────────────────────────────────
+
+    def _register_brain_hooks(self) -> None:
+        """注册 Brain PreHook / PostHook。
+
+        PreHook：在 LLM 生成前注入编码助手能力描述与当前活跃任务状态。
+        PostHook：在 LLM 生成后监控 AI 回复中的 Issue/PR 引用。
+        """
+        if self._brain_hooks_registered:
+            return
+
+        engine = self.ctx.engine.get_engine()
+        brain: Brain | None = getattr(engine, "brain", None)
+        if brain is None:
+            logger.warning("Brain 不可用，跳过 PreHook/PostHook 注册")
+            return
+
+        plugin_ref = self
+
+        def _pre_hook(_brain: Brain, request: ChatRequest, _ctx: dict) -> None:
+            """PreHook：注入当前活跃的 Issue 任务状态。"""
+            active_context = plugin_ref._get_active_task_context()
+            if active_context:
+                request.system_prompt = request.system_prompt.rstrip() + "\n\n" + active_context
+
+        def _post_hook(_brain: Brain, _request: ChatRequest, result: ChatResult, _ctx: dict) -> None:
+            """PostHook：监控 AI 回复中是否涉及 Issue/PR。"""
+            plugin_ref._on_ai_response(result)
+
+        brain.register_pre_hook(_pre_hook, priority=0)
+        brain.register_post_hook(_post_hook, priority=100)
+        self._brain_hooks_registered = True
+
+        logger.info("编码助手 Brain PreHook/PostHook 已注册")
+
+    def _get_active_task_context(self) -> str:
+        """获取当前活跃的 Issue 任务状态文本，供 PreHook 注入到 LLM 上下文。"""
+        if not self._tracker:
+            return ""
+        try:
+            active = self._tracker.list_active()
+        except Exception:
+            return ""
+        if not active:
+            return ""
+        lines = ["【当前活跃的 GitHub 任务】"]
+        for state in active[:3]:
+            lines.append(f"- Issue #{state.issue_number} ({state.repo}): {state.title[:50]} [{state.status}]")
+        return "\n".join(lines)
+
+    def _on_ai_response(self, result: ChatResult) -> None:
+        """PostHook 回调：在 LLM 生成后检查回复中是否涉及 Issue/PR 引用。"""
+        import re
+        issues_found = re.findall(r'#(\d+)', result.clean_text)
+        if issues_found:
+            logger.debug("AI 回复中提及 Issue/PR: %s", issues_found)
 
     @command(
         "py",

@@ -1,6 +1,6 @@
 """Coding Agent GitHub API 封装。
 
-基于 sirius_chat.github.client 提供的 GitHubClient 与 github_headers，
+基于 sirius_pulse.github.client 提供的 GitHubClient 与 github_headers，
 封装 Issue/PR/Label/Fork 等高级操作的快捷函数。
 """
 
@@ -11,7 +11,7 @@ from typing import Any
 
 import httpx
 
-from sirius_chat.github.client import GitHubClient, github_headers
+from sirius_pulse.github.client import GitHubClient, github_headers
 
 logger = logging.getLogger(__name__)
 

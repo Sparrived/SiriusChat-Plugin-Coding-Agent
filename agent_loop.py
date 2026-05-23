@@ -318,7 +318,7 @@ async def _streaming_generate(
         msgs.extend(messages)
     msgs.append({"role": "user", "content": prompt})
 
-    from sirius_chat.providers.base import GenerationRequest
+    from sirius_pulse.providers.base import GenerationRequest
     request = GenerationRequest(
         model=resolved_model or "",
         system_prompt="",
