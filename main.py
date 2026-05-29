@@ -232,7 +232,7 @@ class CodingAgentPlugin(PluginBase):
                 return
 
             # 查找已有 tracker
-            all_data = self.ctx.data_store.all() if hasattr(self.ctx.data_store, "all") else {}
+            all_data = self.ctx.data_store.all() if self.ctx.data_store is not None and hasattr(self.ctx.data_store, "all") else {}
             from .tracker import _PREFIX
             for key, raw in all_data.items():
                 if not key.startswith(_PREFIX):
@@ -262,17 +262,19 @@ class CodingAgentPlugin(PluginBase):
                     # 仅当当前在等待回复时才切到信息收集状态
                     if status == "AWAITING_RESPONSE":
                         data["status"] = "GATHERING_INFO"
-                    self.ctx.data_store.set(key, data)
+                    if self.ctx.data_store is not None:
+                        self.ctx.data_store.set(key, data)
                     logger.info("回灌评论到 tracker: Issue #%d @%s", issue_number, user_login)
                     return
             # 无 tracker → 新建
-            self._tracker.enqueue(
-                issue_number=issue_number,
-                repo=repo_name,
-                title=issue.get("title", "无标题"),
-                body=issue.get("body", ""),
-                labels=[l.get("name", "") for l in (issue.get("labels", []) or [])],
-            )
+            if self._tracker is not None:
+                self._tracker.enqueue(
+                    issue_number=issue_number,
+                    repo=repo_name,
+                    title=issue.get("title", "无标题"),
+                    body=issue.get("body", ""),
+                    labels=[l.get("name", "") for l in (issue.get("labels", []) or [])],
+                )
             logger.info("为已有 Issue #%d 新建 tracker（来自评论事件）", issue_number)
 
         register_comment_handler(_on_issue_comment)
