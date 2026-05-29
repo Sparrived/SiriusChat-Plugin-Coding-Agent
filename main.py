@@ -7,6 +7,7 @@ import sys
 import traceback
 from typing import Any
 
+from sirius_pulse.config.config_builder import ConfigBuilder
 from sirius_pulse.github.event_bridge import (
     register_comment_handler,
     register_issue_handler,
@@ -27,6 +28,107 @@ logger = logging.getLogger(__name__)
 
 _plugin_dependencies = ["httpx", "GitPython", "pytest", "pytest-asyncio", "pytest-cov", "pytest-xdist"]
 
+# 使用 ConfigBuilder 定义插件参数
+_config = ConfigBuilder()
+_config.group("GitHub 认证").add(
+    "github_write_token",
+    type="password",
+    description="GitHub PAT（fork/PR/标签/评论），留空复用 monitor token",
+)
+_config.group("GitHub 认证").add(
+    "github_username",
+    type="str",
+    description="GitHub 用户名（git 提交者身份，留空=仓库 owner）",
+)
+_config.group("GitHub 认证").add(
+    "github_email",
+    type="str",
+    description="GitHub 邮箱（git 提交者 email，留空=username@users.noreply.github.com）",
+)
+_config.group("仓库设置").add(
+    "active_repos",
+    type="list",
+    description="生效仓库（owner/repo，留空=monitor全部）",
+)
+_config.group("Agent 设置").add(
+    "model",
+    type="model",
+    description="自定义 LLM 模型名",
+)
+_config.group("Agent 设置").add(
+    "max_retries",
+    type="int",
+    description="最大重试次数",
+    default=3,
+)
+_config.group("Agent 设置").add(
+    "max_questions",
+    type="int",
+    description="信息收集最大追问次数",
+    default=12,
+)
+_config.group("Agent 设置").add(
+    "test_command",
+    type="str",
+    description="测试命令",
+    default="pytest",
+)
+_config.group("Agent 设置").add(
+    "lint_command",
+    type="str",
+    description="静态检查命令（留空跳过，如 flake8 .）",
+    default="",
+)
+_config.group("功能开关").add(
+    "auto_label",
+    type="boolean",
+    description="启用 Issue 自动标签",
+    default=True,
+)
+_config.group("功能开关").add(
+    "auto_review",
+    type="boolean",
+    description="启用 PR 自动审阅",
+    default=True,
+)
+_config.group("功能开关").add(
+    "auto_close_garbage",
+    type="boolean",
+    description="自动关闭垃圾 Issue/PR",
+    default=True,
+)
+_config.group("功能开关").add(
+    "review_mode",
+    type="str",
+    description="PR 审阅深度: quick|deep",
+    default="quick",
+    choices=["quick", "deep"],
+)
+_config.group("控制台").add(
+    "console_viewer_enabled",
+    type="boolean",
+    description="弹出实时控制台窗口",
+    default=True,
+)
+_config.group("控制台").add(
+    "console_viewer_keep_open",
+    type="boolean",
+    description="修复完成后保持窗口打开",
+    default=False,
+)
+_config.group("日志归档").add(
+    "log_archive_enabled",
+    type="boolean",
+    description="启用工作流日志归档",
+    default=True,
+)
+_config.group("日志归档").add(
+    "log_archive_max_count",
+    type="int",
+    description="归档日志最大保留数",
+    default=50,
+)
+
 
 class CodingAgentPlugin(PluginBase):
     _plugin_name = "coding_agent"
@@ -35,25 +137,7 @@ class CodingAgentPlugin(PluginBase):
     _plugin_version = "2.2.0"
     _plugin_author = "Sparrived/Sirius"
 
-    _plugin_parameters = [
-        {"name": "github_write_token", "type": "string", "description": "GitHub PAT（fork/PR/标签/评论），留空复用 monitor token"},
-        {"name": "github_username", "type": "string", "description": "GitHub 用户名（git 提交者身份，留空=仓库 owner）"},
-        {"name": "github_email", "type": "string", "description": "GitHub 邮箱（git 提交者 email，留空=username@users.noreply.github.com）"},
-        {"name": "active_repos", "type": "list", "description": "生效仓库（owner/repo，留空=monitor全部）"},
-        {"name": "model", "type": "string", "description": "自定义 LLM 模型名"},
-        {"name": "max_retries", "type": "int", "description": "最大重试次数", "default": 3},
-        {"name": "max_questions", "type": "int", "description": "信息收集最大追问次数", "default": 12},
-        {"name": "test_command", "type": "string", "description": "测试命令", "default": "pytest"},
-        {"name": "lint_command", "type": "string", "description": "静态检查命令（留空跳过，如 flake8 .）", "default": ""},
-        {"name": "auto_label", "type": "boolean", "description": "启用 Issue 自动标签", "default": True},
-        {"name": "auto_review", "type": "boolean", "description": "启用 PR 自动审阅", "default": True},
-        {"name": "auto_close_garbage", "type": "boolean", "description": "自动关闭垃圾 Issue/PR", "default": True},
-        {"name": "review_mode", "type": "string", "description": "PR 审阅深度: quick|deep", "default": "quick"},
-        {"name": "console_viewer_enabled", "type": "boolean", "description": "弹出实时控制台窗口", "default": True},
-        {"name": "console_viewer_keep_open", "type": "boolean", "description": "修复完成后保持窗口打开", "default": False},
-        {"name": "log_archive_enabled", "type": "boolean", "description": "启用工作流日志归档", "default": True},
-        {"name": "log_archive_max_count", "type": "int", "description": "归档日志最大保留数", "default": 50},
-    ]
+    _plugin_parameters = _config.build()
     _plugin_permissions = {
         "developer_only": True,
         "hidden_from_intent": True,
